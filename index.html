@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="green">
+  <title>Truck Performance Tracker</title>
+  <!-- Local jsPDF & AutoTable -->
+  <script src="js/jspdf.umd.min.js"></script>
+  <script src="js/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    body { background-color: #ffe6f0; font-family: 'Segoe UI', sans-serif; margin: 20px; color: #333; }
+    h2 { text-align: center; color: #c2185b; }
+    .container { max-width: 900px; margin: auto; background: #fff0f5; padding: 20px; border-radius: 10px; box-shadow: 0 0 8px rgba(0,0,0,0.1); }
+    label { display: block; margin: 10px 0 5px; }
+    input, select, button { width: 93%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
+    button { background-color: #f06292; color: white; cursor: pointer; transition: 0.3s; }
+    button:hover { background-color: #ec407a; }
+    .card { background-color: #fff; padding: 15px; margin-top: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 8px; border: 1px solid #ccc; text-align: center; }
+    .high-temp { color: red; font-weight: bold; }
+    .low-temp { color: green; font-weight: bold; }
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
+    .modal-content { background: white; padding: 20px; border-radius: 10px; max-width: 90%; max-height: 90%; overflow: auto; }
+    .modal-content h3 { margin-top: 0; }
+    .actions button { margin: 0 5px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Truck Performance Tracker</h2>
+    <label>Plugin Time:</label>
+    <input type="time" id="pluginTime">
+    <label>Plugin Temperature (°C):</label>
+    <input type="number" id="pluginTemp">
+    <label>Docking Temperature (°C):</label>
+    <input type="number" id="dockTemp">
+    <label>Takeoff Time:</label>
+    <input type="time" id="takeoffTime">
+    <label>Takeoff Temperature (°C):</label>
+    <input type="number" id="takeoffTemp">
+    <label>Truck Number:</label>
+    <select id="truckNum">
+      <option value="ZE9050">ZE9050</option>
+      <option value="ZB9291">ZB9291</option>
+    </select>
+    <button onclick="generateReport()">Generate Report</button>
+    <button onclick="saveData()">Save</button>
+    <button onclick="openModal('export')">Download PDF</button>
+    <button onclick="openModal('manage')">Manage Entries</button>
+    <div id="reportCard" class="card"></div>
+  </div>
+  <div id="modal" class="modal">
+    <div class="modal-content" id="exportModal" style="display:none;">
+      <h3>Select Report Range</h3>
+      <button onclick="exportPDF('today')">Today</button>
+      <button onclick="exportPDF('week')">Last One Week</button>
+      <button onclick="exportPDF('month')">Last One Month</button>
+      <button onclick="closeModal()">Cancel</button>
+    </div>
+    <div class="modal-content" id="manageModal" style="display:none;">
+      <h3>Manage Entries</h3>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Date</th><th>Truck</th><th>Takeoff Temp</th><th>Dry Temp</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="manageBody"></tbody>
+      </table>
+      <button onclick="closeModal()">Close</button>
+    </div>
+  </div>
+  <script>
+    const STORAGE_KEY='truck_performance_data';
+    const dataStore = JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
+    const refrigerants={ZE9050:'R404A',ZB9291:'R134A'};
+
+    function openModal(type){
+      document.getElementById('exportModal').style.display='none';
+      document.getElementById('manageModal').style.display='none';
+      document.getElementById('modal').style.display='flex';
+      if(type==='export') document.getElementById('exportModal').style.display='block';
+      if(type==='manage'){ loadManage(); document.getElementById('manageModal').style.display='block'; }
+    }
+    function closeModal(){ document.getElementById('modal').style.display='none'; }
+    function generateReport(){
+      const pt=document.getElementById('pluginTime').value, ptemp=document.getElementById('pluginTemp').value,
+            dtemp=document.getElementById('dockTemp').value, tt=document.getElementById('takeoffTime').value,
+            ttemp=document.getElementById('takeoffTemp').value, truck=document.getElementById('truckNum').value;
+      if(!pt||!ptemp||!dtemp||!tt||!ttemp) return alert('Fill all fields.');
+      const rec={timestamp:new Date().toISOString(),pluginTime:pt,pluginTemp:ptemp,
+                     dockTemp:dtemp,takeoffTime:tt,takeoffTemp:ttemp,
+                     dryTemp:'N/A',truckNum:truck,
+                     refrigerant:refrigerants[truck],condition:'N/A',humidity:'N/A'};
+      displayRecord(rec);
+    }
+    function displayRecord(r){
+      const val=parseFloat(r.takeoffTemp);
+      const cls = !isNaN(val) ? (val>3 ? 'high-temp' : 'low-temp') : '';
+      document.getElementById('reportCard').innerHTML=`<h3>Report for ${new Date(r.timestamp).toLocaleString()}</h3>
+        <table><tr><th>Plugin Time</th><td>${r.pluginTime}</td></tr>
+        <tr><th>Plugin Temp</th><td>${r.pluginTemp}°C</td></tr>
+        <tr><th>Dock Temp</th><td>${r.dockTemp}°C</td></tr>
+        <tr><th>Takeoff Time</th><td>${r.takeoffTime}</td></tr>
+        <tr><th>Takeoff Temp</th><td class="${cls}">${r.takeoffTemp}°C</td></tr>
+        <tr><th>Dry Temp</th><td>${r.dryTemp}°C</td></tr>
+        <tr><th>Truck Number</th><td>${r.truckNum}</td></tr>
+        <tr><th>Refrigerant</th><td>${r.refrigerant}</td></tr>
+        <tr><th>Weather</th><td>${r.condition}</td></tr>
+        <tr><th>Humidity</th><td>${r.humidity}%</td></tr></table>`;
+    }
+    function saveData(){
+      const c=document.querySelectorAll('#reportCard td'); if(!c.length)return alert('Generate first!');
+      const rec={timestamp:new Date().toISOString(),pluginTime:c[0].innerText,pluginTemp:c[1].innerText.replace('°C',''),
+                 dockTemp:c[2].innerText.replace('°C',''),takeoffTime:c[3].innerText,
+                 takeoffTemp:c[4].innerText.replace('°C',''),dryTemp:c[5].innerText.replace('°C',''),
+                 truckNum:c[6].innerText,refrigerant:c[7].innerText,condition:c[8].innerText,humidity:c[9].innerText.replace('%','')};
+      dataStore.push(rec);localStorage.setItem(STORAGE_KEY,JSON.stringify(dataStore));
+      alert('Saved!');
+    }
+    function loadManage(){const tbody=document.getElementById('manageBody');tbody.innerHTML='';dataStore.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${i+1}</td><td>${r.timestamp.split('T')[0]}</td><td>${r.truckNum}</td><td>${r.takeoffTemp}°C</td><td>${r.dryTemp}°C</td><td class="actions"><button onclick="editEntry(${i})">Edit</button><button onclick="deleteEntry(${i})">Delete</button></td>`;tbody.appendChild(tr);});}
+    function deleteEntry(i){if(confirm('Delete entry?')){dataStore.splice(i,1);localStorage.setItem(STORAGE_KEY,JSON.stringify(dataStore));loadManage();}}
+    function editEntry(i){const r=dataStore[i];document.getElementById('pluginTime').value=r.pluginTime;document.getElementById('pluginTemp').value=r.pluginTemp;document.getElementById('dockTemp').value=r.dockTemp;document.getElementById('takeoffTime').value=r.takeoffTime;document.getElementById('takeoffTemp').value=r.takeoffTemp;document.getElementById('truckNum').value=r.truckNum;closeModal();dataStore.splice(i,1);localStorage.setItem(STORAGE_KEY,JSON.stringify(dataStore));}
+  </script>
+</body>
+</html>
