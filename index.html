@@ -1,13 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE html><html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="green">
   <title>Truck Performance Tracker</title>
-  <!-- Local jsPDF & AutoTable -->
-  <script src="js/jspdf.umd.min.js"></script>
-  <script src="js/jspdf.plugin.autotable.min.js"></script>
+  <!-- jsPDF & AutoTable -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
   <style>
     body { background-color: #ffe6f0; font-family: 'Segoe UI', sans-serif; margin: 20px; color: #333; }
     h2 { text-align: center; color: #c2185b; }
@@ -71,6 +70,7 @@
     </div>
   </div>
   <script>
+    const API_KEY='b719d65167377c9dc3526fcff119b66a', LAT=-0.8212, LON=36.9426;
     const STORAGE_KEY='truck_performance_data';
     const dataStore = JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
     const refrigerants={ZE9050:'R404A',ZB9291:'R134A'};
@@ -88,11 +88,14 @@
             dtemp=document.getElementById('dockTemp').value, tt=document.getElementById('takeoffTime').value,
             ttemp=document.getElementById('takeoffTemp').value, truck=document.getElementById('truckNum').value;
       if(!pt||!ptemp||!dtemp||!tt||!ttemp) return alert('Fill all fields.');
-      const rec={timestamp:new Date().toISOString(),pluginTime:pt,pluginTemp:ptemp,
+      fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`)
+        .then(r=>r.json()).then(w=>{
+          const rec={timestamp:new Date().toISOString(),pluginTime:pt,pluginTemp:ptemp,
                      dockTemp:dtemp,takeoffTime:tt,takeoffTemp:ttemp,
-                     dryTemp:'N/A',truckNum:truck,
-                     refrigerant:refrigerants[truck],condition:'N/A',humidity:'N/A'};
-      displayRecord(rec);
+                     dryTemp:w.main.temp.toFixed(1),truckNum:truck,
+                     refrigerant:refrigerants[truck],condition:w.weather[0].main,humidity:w.main.humidity};
+          displayRecord(rec);
+        });
     }
     function displayRecord(r){
       const val=parseFloat(r.takeoffTemp);
@@ -117,10 +120,22 @@
                  truckNum:c[6].innerText,refrigerant:c[7].innerText,condition:c[8].innerText,humidity:c[9].innerText.replace('%','')};
       dataStore.push(rec);localStorage.setItem(STORAGE_KEY,JSON.stringify(dataStore));
       alert('Saved!');
+      exportCSV();
+    }
+    function exportCSV(){
+      if(!dataStore.length) return;
+      const headers = ['timestamp','truckNum','pluginTime','pluginTemp','dockTemp','takeoffTime','takeoffTemp','dryTemp','refrigerant','condition','humidity'];
+      const rows = dataStore.map(r => headers.map(h => r[h]));
+      const csv = [headers.join(','), ...rows.map(r=>r.join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = 'truck_data.csv'; document.body.appendChild(a);
+      a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     }
     function loadManage(){const tbody=document.getElementById('manageBody');tbody.innerHTML='';dataStore.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${i+1}</td><td>${r.timestamp.split('T')[0]}</td><td>${r.truckNum}</td><td>${r.takeoffTemp}°C</td><td>${r.dryTemp}°C</td><td class="actions"><button onclick="editEntry(${i})">Edit</button><button onclick="deleteEntry(${i})">Delete</button></td>`;tbody.appendChild(tr);});}
     function deleteEntry(i){if(confirm('Delete entry?')){dataStore.splice(i,1);localStorage.setItem(STORAGE_KEY,JSON.stringify(dataStore));loadManage();}}
     function editEntry(i){const r=dataStore[i];document.getElementById('pluginTime').value=r.pluginTime;document.getElementById('pluginTemp').value=r.pluginTemp;document.getElementById('dockTemp').value=r.dockTemp;document.getElementById('takeoffTime').value=r.takeoffTime;document.getElementById('takeoffTemp').value=r.takeoffTemp;document.getElementById('truckNum').value=r.truckNum;closeModal();dataStore.splice(i,1);localStorage.setItem(STORAGE_KEY,JSON.stringify(dataStore));}
-  </script>
+    function exportPDF(range){closeModal();const{jsPDF}=window.jspdf;const doc=new jsPDF();const now=new Date(),stamp=now.toISOString().split('T')[0];const filtered=dataStore.filter(r=>{const d=(now-new Date(r.timestamp))/86400000;return range==='today'?d<1:range==='week'?d<=7:d<=30;}).sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));const rows=filtered.map(r=>[new Date(r.timestamp).toLocaleDateString(),r.truckNum,r.pluginTime,r.pluginTemp+'°C',r.dockTemp+'°C',r.takeoffTime,r.takeoffTemp+'°C',r.dryTemp+'°C',r.refrigerant,r.condition,r.humidity+'%']);doc.setFillColor(255,230,240);doc.rect(0,0,210,297,'F');doc.setTextColor(194,24,91);doc.setFontSize(16);doc.text('Enkasiti Truck Performance Report',20,20);doc.autoTable({startY:30,head:[['Date','Truck Number','Plugin Time','Plugin Temp','Dock Temp','Takeoff Time','Takeoff Temp','Dry Temp','Refrigerant','Weather','Humidity']],body:rows,styles:{fillColor:[255,240,250],textColor:50,fontSize:10},headStyles:{fillColor:[240,128,168],textColor:255},alternateRowStyles:{fillColor:[255,250,255]},didParseCell:data=>{if(data.section==='body'&&data.column.index===6){const num=parseFloat(data.cell.raw);if(!isNaN(num)){if(num>3){data.cell.styles.textColor=[255,0,0];data.cell.styles.fontStyle='bold';} else {data.cell.styles.textColor=[0,128,0];data.cell.styles.fontStyle='bold';}}}}});doc.save(`Enkasiti Truck_Report_${range}_${stamp}.pdf`);}  </script>
 </body>
 </html>
